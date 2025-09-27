@@ -1,1 +1,83 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Consumer App - NourishNet (Demo)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+body{font-family:sans-serif;margin:0;padding:12px;max-width:480px;}
+input,button{display:block;width:100%;padding:8px;margin:6px 0;}
+#map{height:400px;margin-top:8px;}
+.order{border:1px solid #ddd;padding:8px;margin:6px 0;border-radius:6px;}
+</style>
+</head>
+<body>
+<h1>Consumer App (Demo)</h1>
+<p>Backend URL: <input id="baseUrl" value="http://localhost:4000"/></p>
+<input id="cname" placeholder="Name"/>
+<input id="cemail" placeholder="Email"/>
+<input id="cpass" type="password" placeholder="Password"/>
+<button onclick="custRegister()">Register</button>
+<button onclick="custLogin()">Login</button>
+<div id="app" style="display:none;">
+  <h2>Welcome, <span id="nameSpan"></span></h2>
+  <button onclick="logout()">Logout</button>
+  <h3>Your Orders</h3>
+  <div id="orders"></div>
+  <div id="map"></div>
+</div>
 
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let token, cid;
+const baseInput = () => document.getElementById('baseUrl').value || 'http://localhost:4000';
+const socket = io(baseInput());
+
+function custRegister(){
+  const name=document.getElementById('cname').value, email=document.getElementById('cemail').value, password=document.getElementById('cpass').value;
+  fetch(baseInput()+'/auth/customer/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password})})
+  .then(r=>r.json()).then(d=>{ if(d.token){ token=d.token; cid=d.user.id; afterLogin(d.user.name); } else alert(d.error); });
+}
+function custLogin(){
+  const email=document.getElementById('cemail').value, password=document.getElementById('cpass').value;
+  fetch(baseInput()+'/auth/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
+  .then(r=>r.json()).then(d=>{ if(d.token){ token=d.token; cid=d.user.id; afterLogin(d.user.name); } else alert(d.error); });
+}
+function afterLogin(name){
+  document.getElementById('nameSpan').innerText = name;
+  document.getElementById('app').style.display='block';
+  socket.emit('join','customer-'+cid);
+  socket.on('order-position', (data)=>{ showDriverPosition(data); });
+  socket.on('order-updated', (data)=>{ loadOrders(); });
+  loadOrders();
+}
+
+function logout(){ token=null; cid=null; document.getElementById('app').style.display='none'; }
+
+// map
+const map = L.map('map').setView([20.5937,78.9629],5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+let driverMarkers = {};
+function showDriverPosition(msg){
+  // msg: {orderId, lat, lon, eta}
+  const key = 'd'+msg.orderId;
+  if(driverMarkers[key]) driverMarkers[key].setLatLng([msg.lat,msg.lon]);
+  else {
+    driverMarkers[key] = L.marker([msg.lat,msg.lon]).addTo(map).bindPopup('Driver for order '+msg.orderId);
+  }
+}
+function loadOrders(){
+  fetch(baseInput()+'/customer/orders',{headers:{'Authorization':'Bearer '+token}})
+  .then(r=>r.json()).then(d=>{
+    const container = document.getElementById('orders'); container.innerHTML='';
+    d.orders.forEach(o=>{
+      const div = document.createElement('div'); div.className='order';
+      div.innerHTML = `<strong>Order #${o.id}</strong><div>Vendor: ${o.vendor_name}</div><div>Status: ${o.status}</div><div>ETA: ${new Date(o.eta).toLocaleString()}</div>`;
+      container.appendChild(div);
+    });
+  });
+}
+</script>
+</body>
+</html>
